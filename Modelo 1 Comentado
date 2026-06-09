@@ -1,0 +1,96 @@
+# Modelo1  Modelado de una CS simple
+import random       #Generar numeros aleatorios (para simular la demanda)
+import statistics   #Funciones estadisticas:medias, varianza, etc.
+import matplotlib.pyplot as plt #Libreria para graficos
+
+def moving_average(D, m, t):  #D es la lista de demandas historica,
+                                # m es el numero de periodos que queremos promediar
+                                #t es el periodo actual
+    last_sample = t    # ultimo periodo a considerar
+    first_sample = max(t - m, 0) + 1   # primer periodo a considerar(evita negativos)
+    average = statistics.mean(D[first_sample:last_sample + 1])  #media de ese rango
+    return average   #devuelve el valor calculado
+
+# 1. PARAMETROS DE LA SIMULACION---------------------------------------------
+random.seed(30)   #Semilla para reproducibilidad de los aleatorios
+t_max = 500       #numero de periodos a simular #500 valor original, # tiempo total
+warm_up = 100     #descartar los primeros 100 periodos (fase transitoria) valor original 100
+L = 4             #Leadtime (tiempo de espera de los pedidos) valor original 4
+
+# 2. PARAMETROS DE LA DEMANDA--------------------------------------
+D = [0]         #Lista de demandas, empezamos con 0 en t=0
+mu = 100        #Media de la demanda  # Datos historicos usados
+sigma = 5       # desviacion estandar de la demanda valor original 5
+
+
+# 3. PARAMETROS DE DECISION----------------------------
+m = 15         #Ventana de media movil valor original 15
+
+## 4 Variables de estado--------------------------
+R = [0]         #recepciones(pedidos que llegan)
+O = [0]         #ordenes emitidas
+I = [100]       #inventario inicial de 100 unidades
+W = [0]         #work in process (pedidos en curso)
+service = []    #nivel de servicio (se llenara en el bucle)
+
+### 5.1 BUCLE DE LA SIMULACION---------------------------
+t = 1       #periodo inicial
+while t <= t_max:
+    # Recepción de pedidos (si han pasado L periodos)
+    if t - L >= 0:
+        R.append(O[t - L])  #llega el pedido hecho L periodos antes  #el pedido llega despues del Lead time
+    else:
+        R.append(0)     #si no, no llega nada  
+
+    # 5.2 Actualizar inventario (inventario anterior + recepciones)
+    I.append(I[t - 1] + R[t])       #Inventario nuevo=inventario anterior + pedidos recibidos
+    #5.3 Actualización de Work in process o pedidos en proces o transito
+    W.append(W[t - 1] - R[t])     #Los pedidos que llegaron salen de transito
+
+    # 5.4 Generar demanda aleatoria de este periodo (truncada a cero)  #Generar demanda
+    curr_demand = max(0, round(random.gauss(mu, sigma)))   #el cliente compra aleatoriamente
+    D.append(curr_demand)
+
+    # 5.5 Calcular nivel de servicio segun inventario disponible
+    if I[t] >= curr_demand:      #¿tengo suficiente inventario para atender la demanda?
+        service.append(100)     #demanda cubierta al 100%
+    elif I[t] > 0:              
+        service.append((I[t] / curr_demand) * 100)  #demanda cubierta parcialmente
+    else:
+        service.append(0)   #sin stock   
+
+    # 5.6 Satisfacer la demanda (puede generar inventario negativo/backlog) 
+    I[t] = I[t] - curr_demand     #el inventario puede ser negativo
+
+    # 5.7 Calcular nueva orden con politica order-up-to y media movil    #¿cuanto espero vender durante el lead time o tiempo de entrega?
+    curr_order = moving_average(D, m, t) * L - I[t] - W[t]    #Calcular pedido
+    O.append(curr_order)
+
+    # 5.8 Actualizar work in process con la nueva orden
+    W[t] = W[t] + curr_order     #Actualizar pedidos en transito 
+    #5.9 Pasar al siguiente periodo
+    t = t + 1
+
+
+vO = statistics.variance(O[warm_up:t_max + 1])      #VARIANZA DE ORDENES
+vI = statistics.variance(I[warm_up:t_max + 1])      #VARIANZA DE INVENTARIO
+vD = statistics.variance(D[warm_up:t_max + 1])      #VARIANZA DE DEMANDA
+bwe = vO / vD       #Bullwhip Effect (BWE)
+ivar = vI / vD      #Variabilidad relativa inventario/demanda
+AvService = statistics.mean(service[warm_up:t_max + 1])   #nivel de servicio medio
+
+print(f"BWE: {bwe}; IVAR: {ivar}; Average Service: {AvService}")
+bwe_minBound = 1 + (2 * L ** 2 / m ** 2) + (2 * L / m)
+print(f"The minimal bound for the BWE is: {bwe_minBound}")
+
+######
+#### RESULTADOS GRAFICOS------------------
+# plt.plot(I)     #LINEA DE INVENTARIO
+# plt.plot(O)     #LINEA DE ORDENES
+# plt.plot(D)     #LINEA DE DEMANDA
+# plt.title("Orders vs Inventory vs Demand")  #TITULO DEL GRAFICO
+# plt.xlabel("Time")      #ETIQUETA EJE X
+# plt.legend(["Inventory", "Orders", "Demand"])  #LEYENDA
+# plt.show()      #MOSTRAR GRAFICO
+
+
