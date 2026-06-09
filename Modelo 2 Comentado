@@ -1,0 +1,106 @@
+#modelo 2  Modelo 2: CS simple con stock de seguridad
+import random
+import statistics
+import matplotlib.pyplot as plt
+
+def moving_average(D, m, t):
+    last_sample = t
+    first_sample = max(t - m, 0) + 1
+    return statistics.mean(D[first_sample:last_sample + 1])
+
+def moving_stdev(D, m, t):
+    first_sample = max(t - m, 0) + 1
+    sample = D[first_sample:t + 1]
+    if len(sample) < 2:
+        return 0
+    return statistics.stdev(sample)
+
+# 1. PARAMETROS DE LA SIMULACION--------------------------
+random.seed(30)
+t_max = 500
+warm_up = 100
+L = 4
+z = 1
+
+# 2. PARAMETROS DE LA DEMANDA---------
+D = [0]
+mu = 100
+sigma = 25   #valor original 5
+
+# 3. PARAMETROS DE DECISION----------------------------
+m = 15
+
+# 4 Variables de estado--------------------------
+R = [0]
+O = [0]
+I = [100]
+W = [0]
+service = []
+
+# 5.1 BUCLE DE LA SIMULACION---------------------------
+t = 1
+while t <= t_max:
+    # Recepción de pedidos
+    if t - L >= 0:
+        R.append(O[t - L])
+    else:
+        R.append(0)
+
+    # 5.2 Actualizar inventario
+    I.append(I[t - 1] + R[t])
+
+    # 5.3 Actualizar work in process
+    W.append(W[t - 1] - R[t])
+
+    # 5.4 Generar demanda aleatoria de este periodo
+    curr_demand = max(0, round(random.gauss(mu, sigma)))
+    D.append(curr_demand)
+
+    # 5.5 Calcular nivel de servicio segun inventario disponible
+    if I[t] >= curr_demand:
+        service.append(100)
+    elif I[t] > 0:
+        service.append((I[t] / curr_demand) * 100)
+    else:
+        service.append(0)
+
+    # 5.6 Satisfacer la demanda
+    I[t] = I[t] - curr_demand
+
+    # Calcular s* = μL + z·σL
+    mu_L = moving_average(D, m, t) * L
+    sigma_L = moving_stdev(D, m, t) * (L ** 0.5)
+    s_star = mu_L + z * sigma_L
+
+    # 5.7 Calcular nueva orden con politica order-up-to y media movil
+    curr_order = s_star - I[t] - W[t]
+    O.append(curr_order)
+
+    # 5.8 Actualizar work in process con la nueva orden
+    W[t] = W[t] + curr_order
+
+    # 5.9 Pasar al siguiente periodo
+    t = t + 1
+
+# RESULTADOS GRAFICOS------------------
+plt.plot(I)
+plt.plot(O)
+plt.plot(D)
+plt.title("Orders vs Inventory vs Demand, CON STOCK DE SEGURIDAD")
+plt.xlabel("Time")
+plt.legend(["Inventory", "Orders", "Demand"])
+plt.show()
+
+vO = statistics.variance(O[warm_up:t_max + 1])
+vI = statistics.variance(I[warm_up:t_max + 1])
+vD = statistics.variance(D[warm_up:t_max + 1])
+
+bwe = vO / vD
+ivar = vI / vD
+
+AvService = statistics.mean(service[warm_up - 1:t_max])
+
+print(f"BWE: {bwe}; IVAR: {ivar}; Average Service: {AvService}")
+
+bwe_minBound = 1 + (2 * L ** 2 / m ** 2) + (2 * L / m)
+print(f"The minimal bound for the BWE is: {bwe_minBound}")
