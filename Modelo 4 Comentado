@@ -1,0 +1,123 @@
+#modelo 4 Modelo 4:Con Replicas 
+import random
+import statistics
+import math
+from scipy import stats
+
+# ─── FUNCIONES AUXILIARES ────────────────────────────────────────────────────
+
+def moving_average(D, m, t):
+    first_sample = max(t - m, 0) + 1
+    return statistics.mean(D[first_sample:t + 1])
+
+def moving_stdev(D, m, t):
+    first_sample = max(t - m, 0) + 1
+    sample = D[first_sample:t + 1]
+    if len(sample) < 2:
+        return 0
+    return statistics.stdev(sample)
+
+def confidenceInt(datos, confianza):
+    n = len(datos)
+    media = statistics.mean(datos)
+    desv_est = statistics.stdev(datos)
+    error_estandar = desv_est / math.sqrt(n)
+    t_critico = stats.t.ppf((1 + confianza) / 2, df=n - 1)
+    margen_error = t_critico * error_estandar
+    return media - margen_error, media + margen_error
+
+# ─── 1. PARÁMETROS DE LA SIMULACIÓN ──────────────────────────────────────────
+random.seed(30)
+t_max   = 500 #Cantidad de pedidos simulados
+warm_up = 100  #Ignora los primeros periodos o deman
+L = 4        # Tiempo de entrega (escenario base)
+z = 2        # Factor de seguridad
+
+# ─── 2. PARÁMETROS DE LA DEMANDA ─────────────────────────────────────────────
+mu    = 100
+sigma = 5    # Desv. estándar demanda (escenario base)
+
+# ─── 3. PARÁMETROS DE DECISIÓN ───────────────────────────────────────────────
+m = 15       # Ventana media móvil (escenario base)
+
+# ─── 4. PARÁMETROS DEL BUCLE DE RÉPLICAS ─────────────────────────────────────
+num_replicas = 20
+confianza    = 0.95
+
+bwe_list       = []
+ivar_list      = []
+service_list   = []
+inventory_list = []
+
+# ─── 5. BUCLE DE RÉPLICAS ────────────────────────────────────────────────────
+for rep in range(num_replicas):
+
+    # 5.1 Inicialización de variables de estado
+    D       = [0]
+    R       = [0]
+    O       = [0]
+    I       = [100]
+    W       = [0]
+    service = []
+
+    # 5.2 Bucle de simulación
+    t = 1
+    while t <= t_max:
+
+        R.append(O[t - L] if t - L >= 0 else 0)
+
+        I.append(I[t - 1] + R[t])
+        W.append(W[t - 1] - R[t])
+
+        curr_demand = max(0, round(random.gauss(mu, sigma)))
+        D.append(curr_demand)
+
+        if I[t] >= curr_demand:
+            service.append(100)
+        elif I[t] > 0:
+            service.append((I[t] / curr_demand) * 100)
+        else:
+            service.append(0)
+
+        I[t] = max(0, I[t] - curr_demand)
+
+        mu_L    = moving_average(D, m, t) * L
+        sigma_L = moving_stdev(D, m, t) * (L ** 0.5)
+        s_star  = mu_L + z * sigma_L
+
+        curr_order = max(0, round(s_star - I[t] - W[t]))
+        O.append(curr_order)
+        W[t] = W[t] + curr_order
+
+        t += 1
+
+    # 5.3 Métricas de la réplica
+    vO = statistics.variance(O[warm_up:t_max + 1])
+    vI = statistics.variance(I[warm_up:t_max + 1])
+    vD = statistics.variance(D[warm_up:t_max + 1])
+
+    bwe_list.append(vO / vD)
+    ivar_list.append(vI / vD)
+    service_list.append(statistics.mean(service[warm_up:t_max + 1]))
+    inventory_list.append(statistics.mean(I[warm_up:t_max + 1]))
+
+# ─── 6. RESULTADOS ───────────────────────────────────────────────────────────
+print(f"Modelo 4 ({num_replicas} rep; seed=30)\n")
+
+print(f"Av_BWE:       {statistics.mean(bwe_list)}")
+print(f"Av_IVAR:      {statistics.mean(ivar_list)}")
+print(f"Av_Inventory: {statistics.mean(inventory_list)}")
+print(f"Av_Service:   {statistics.mean(service_list)}\n")
+
+bwe_ci  = confidenceInt(bwe_list,       confianza)
+ivar_ci = confidenceInt(ivar_list,      confianza)
+inv_ci  = confidenceInt(inventory_list, confianza)
+svc_ci  = confidenceInt(service_list,   confianza)
+
+print(f"IC95% BWE:       [{bwe_ci[0]:.6f}, {bwe_ci[1]:.6f}]")
+print(f"IC95% IVAR:      [{ivar_ci[0]:.6f}, {ivar_ci[1]:.6f}]")
+print(f"IC95% Inventory: [{inv_ci[0]:.6f}, {inv_ci[1]:.6f}]")
+print(f"IC95% Service:   [{svc_ci[0]:.6f}, {svc_ci[1]:.6f}]")
+
+bwe_minBound = 1 + (2 * L**2 / m**2) + (2 * L / m)
+print(f"\nCota mínima teórica BWE: {bwe_minBound:.4f}")
